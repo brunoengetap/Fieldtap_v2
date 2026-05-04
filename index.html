@@ -794,12 +794,30 @@ function setGASStatus(state, label) {
 let currentScreen = 't1';
 
 function goTo(id) {
-  SES.history.push(currentScreen);
+  if (id === currentScreen) {
+    const curr = document.getElementById('scr-' + currentScreen);
+    if (curr) curr.classList.remove('hidden', 'out');
+    return;
+  }
+
   const prev = document.getElementById('scr-' + currentScreen);
   const next = document.getElementById('scr-' + id);
+
+  if (!prev || !next) {
+    console.warn('Tela não encontrada em goTo:', { currentScreen, id, prev, next });
+    return;
+  }
+
+  SES.history.push(currentScreen);
+
   prev.classList.add('out');
   next.classList.remove('hidden');
-  setTimeout(() => { prev.classList.add('hidden'); prev.classList.remove('out'); }, 280);
+
+  setTimeout(() => {
+    prev.classList.add('hidden');
+    prev.classList.remove('out');
+  }, 280);
+
   currentScreen = id;
 }
 
@@ -1457,13 +1475,7 @@ function showRevision() {
     });
     document.getElementById('tr-body').innerHTML = html;
   }
-  SES.history.push(currentScreen);
-  const prev = document.getElementById('scr-' + currentScreen);
-  const next = document.getElementById('scr-tr');
-  prev.classList.add('out');
-  next.classList.remove('hidden');
-  setTimeout(() => { prev.classList.add('hidden'); prev.classList.remove('out'); }, 280);
-  currentScreen = 'tr';
+  goTo('tr');
 }
 
 function removeItem(eqId, idx) {
@@ -1473,14 +1485,7 @@ function removeItem(eqId, idx) {
 }
 
 function addItemToEquip(eqId) {
-  SES.equip = SES.equipamentos.find(e=>e.id_equipamento===eqId);
-  SES.history.push('tr');
-  const prev = document.getElementById('scr-tr');
-  const next = document.getElementById('scr-t4');
-  prev.classList.add('out');
-  next.classList.remove('hidden');
-  setTimeout(() => { prev.classList.add('hidden'); prev.classList.remove('out'); }, 280);
-  currentScreen = 't4';
+  SES.equip = SES.equipamentos.find(e => e.id_equipamento === eqId);
   renderT4();
 }
 
