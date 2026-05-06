@@ -636,6 +636,69 @@ input[type="number"]::-webkit-inner-spin-button { -webkit-appearance: none; }
 </div>
 
 <!-- ════════════════════════════════════════════════════════════ -->
+<!-- TF2 — CHECKLIST FASE 2: RETORNO AO CAMPO                   -->
+<!-- ════════════════════════════════════════════════════════════ -->
+<div class="screen hidden" id="scr-tf2">
+  <div class="hdr">
+    <div class="hdr-back" onclick="goTo('t2')">‹</div>
+    <div class="hdr-info">
+      <div class="hdr-title" id="tf2-os-num">OS —</div>
+      <div class="hdr-sub" id="tf2-cliente">Cliente</div>
+    </div>
+    <div class="hdr-badge" style="background:var(--accent2,#1F7A3C)">F2</div>
+  </div>
+  <div style="padding:10px 14px 0;background:var(--hdr);border-bottom:1px solid var(--border)">
+    <div style="font-size:11px;font-weight:700;color:var(--ok);letter-spacing:.5px;text-transform:uppercase;margin-bottom:4px">📦 Fase 2 — Retorno ao Campo</div>
+    <div id="tf2-progress-txt" style="font-size:12px;color:var(--text2);padding-bottom:8px">0 de 0 itens concluídos</div>
+    <div style="height:4px;background:var(--border);border-radius:4px;margin-bottom:10px">
+      <div id="tf2-progress-bar" style="height:4px;background:var(--ok);border-radius:4px;width:0%;transition:width .3s"></div>
+    </div>
+  </div>
+  <div class="body" id="tf2-body" style="padding-bottom:80px"></div>
+  <div class="bot bot-single">
+    <button class="btn btn-primary" id="tf2-btn-fechar" onclick="fecharOSFase2()" disabled>✅ Finalizar e Fechar OS</button>
+  </div>
+</div>
+
+<!-- Dialog: registrar item F2 -->
+<div class="dialog-overlay" id="modal-item-f2">
+  <div class="dialog">
+    <div class="dialog-head" id="f2item-title">Registrar Item</div>
+    <div class="dialog-body">
+      <div id="f2item-desc" style="font-size:13px;font-weight:600;color:var(--text);margin-bottom:12px"></div>
+      <div class="field">
+        <label>Ação realizada *</label>
+        <select id="f2item-acao">
+          <option value="instalado">Instalado</option>
+          <option value="entregue">Entregue ao responsável</option>
+          <option value="calibrado">Calibrado + instalado</option>
+        </select>
+      </div>
+      <div class="field">
+        <label>Data de execução *</label>
+        <input type="date" id="f2item-data">
+      </div>
+      <div class="field" id="f2-calib-block" style="display:none">
+        <label>Nº Certificado de calibração</label>
+        <input type="text" id="f2item-cert" placeholder="CAL-2026-001">
+      </div>
+      <div class="field" id="f2-lacre-block" style="display:none">
+        <label>Nº Lacre</label>
+        <input type="text" id="f2item-lacre" placeholder="L-001">
+      </div>
+      <div class="field">
+        <label>Observação (opcional)</label>
+        <input type="text" id="f2item-obs" placeholder="Ex: instalado após calibração externa">
+      </div>
+    </div>
+    <div class="dialog-foot">
+      <button class="btn btn-ghost btn-sm" style="flex:1" onclick="closeDialog('modal-item-f2')">Cancelar</button>
+      <button class="btn btn-primary btn-sm" style="flex:2" onclick="confirmarItemF2()">✅ Confirmar</button>
+    </div>
+  </div>
+</div>
+
+<!-- ════════════════════════════════════════════════════════════ -->
 <!-- MODAL: NOVO EQUIPAMENTO EM CAMPO                            -->
 <!-- ════════════════════════════════════════════════════════════ -->
 <div class="dialog-overlay" id="modal-novoequip">
@@ -691,7 +754,7 @@ input[type="number"]::-webkit-inner-spin-button { -webkit-appearance: none; }
 // ════════════════════════════════════════════════════════════════
 // CONFIG — substitua pela URL real do Web App GAS
 // ════════════════════════════════════════════════════════════════
-const GAS_URL = 'https://script.google.com/macros/s/AKfycbyIAi-J0DrEBgRj8fIWQShO9ebvunSA0HMnnSzCEbax20db7x9xJ9L204KwzOHZYsw3mA/exec';
+const GAS_URL = 'https://script.google.com/macros/s/AKfycbz-YAuQjsqJYIW3Im4vzM1whJ9mitfWokdD1hsniBv6XQLoa9imkAQ7YXLI0PPDoFXk/exec';
 
 // ════════════════════════════════════════════════════════════════
 // ESTADO DA SESSÃO
@@ -913,6 +976,7 @@ function getDemoOS() {
   return [
     { id_os:'OS-2026-001', id_cliente:'CLI-001', cliente:'Gerdau — Divinópolis', numero_os:'OS-2026-001', descricao:'Inspeção NR-13 anual', data_abertura:'2026-05-01', status:'ativa', fase_atual:'1', total_equipamentos:2 },
     { id_os:'OS-2026-002', id_cliente:'CLI-002', cliente:'Farmax Ind. Farmacêutica', numero_os:'OS-2026-002', descricao:'Calibração e inspeção', data_abertura:'2026-05-03', status:'ativa', fase_atual:'1', total_equipamentos:2 },
+    { id_os:'OS-2026-003', id_cliente:'CLI-001', cliente:'Gerdau — Divinópolis', numero_os:'OS-2026-003', descricao:'Retorno campo — instalação manômetros', data_abertura:'2026-04-20', status:'ativa', fase_atual:'2', total_equipamentos:2 },
   ];
 }
 
@@ -933,7 +997,7 @@ function renderT2() {
         <div class="os-desc">${o.descricao || '—'}</div>
         <div class="os-meta">
           <span class="pill pill-blue">📅 ${fmtDate(o.data_abertura)}</span>
-          <span class="pill pill-ok">Fase ${o.fase_atual}</span>
+          <span class="pill ${String(o.fase_atual) === '2' ? 'pill-warn' : 'pill-ok'}">${String(o.fase_atual) === '2' ? '🚗 Fase 2 — Retorno' : 'Fase ' + o.fase_atual}</span>
           <span class="pill pill-gray">🔧 ${o.total_equipamentos || 0} equipamentos</span>
         </div>
       </div>`).join('');
@@ -944,6 +1008,14 @@ function renderT2() {
 async function selectOS(id) {
   const osList = SES._osList || getDemoOS();
   SES.os = osList.find(o => o.id_os === id);
+
+  // S5: Se a OS está na Fase 2, redireciona para o checklist de retorno
+  const fase = String(SES.os?.fase_atual || '1');
+  if (fase === '2') {
+    await entrarFase2(id);
+    return;
+  }
+
   SES.levantamento = {};
   showLoading('Carregando equipamentos…');
   let equips = [];
@@ -1526,6 +1598,187 @@ function novaOS() {
   SES.os = null; SES.equipamentos = []; SES.levantamento = {}; SES.history = [];
   renderT2();
 }
+
+// ════════════════════════════════════════════════════════════════
+// S5 — FASE 2: RETORNO AO CAMPO
+// ════════════════════════════════════════════════════════════════
+let _f2Itens = [];      // itens da OS Fase 2 carregados do GAS
+let _f2ItemCtx = null;  // item sendo registrado no dialog
+
+async function entrarFase2(idOS) {
+  showLoading('Carregando itens da Fase 2…');
+  const os = (SES._osList || getDemoOS()).find(o => o.id_os === idOS);
+  SES.os = os;
+  document.getElementById('tf2-os-num').textContent = 'OS ' + (os?.numero_os || idOS);
+  document.getElementById('tf2-cliente').textContent = os?.cliente || '';
+
+  // Tenta buscar itens do GAS
+  let itens = [];
+  try {
+    const r = await gasGet('getItensByOS', { id_os: idOS, status: 'em_campo_f2' });
+    if (r.status === 'ok' && r.itens?.length) itens = r.itens;
+  } catch(e) {}
+
+  // Fallback demo se não trouxe nada
+  if (!itens.length) {
+    itens = getDemoItensF2(idOS);
+  }
+
+  // Adicionar campo de controle local
+  itens.forEach(it => { it._concluido = false; it._dados = null; });
+  _f2Itens = itens;
+
+  hideLoading();
+  renderTF2();
+  goTo('tf2');
+}
+
+function getDemoItensF2(idOS) {
+  return [
+    { id_item:'ACE-2026-001', id_os: idOS, id_equipamento:'EQ-001', tag_equipamento:'VP-01',
+      descricao_curta:'Manômetro Glicerinado 63mm 1/4" NPT 0-10kgf', quantidade:1,
+      requer_calibracao:'true', requer_lacre:'true', status:'em_campo_f2' },
+    { id_item:'ACE-2026-002', id_os: idOS, id_equipamento:'EQ-001', tag_equipamento:'VP-01',
+      descricao_curta:'Válvula de segurança 1/2" PA=8kgf Aço', quantidade:2,
+      requer_calibracao:'false', requer_lacre:'false', status:'em_campo_f2' },
+    { id_item:'ACE-2026-003', id_os: idOS, id_equipamento:'EQ-002', tag_equipamento:'CL-01',
+      descricao_curta:'DCBI 1/4" completo', quantidade:1,
+      requer_calibracao:'false', requer_lacre:'true', status:'em_campo_f2' },
+  ];
+}
+
+function renderTF2() {
+  const itens = _f2Itens;
+  const total = itens.length;
+  const conc  = itens.filter(it => it._concluido).length;
+
+  // Progress
+  document.getElementById('tf2-progress-txt').textContent = `${conc} de ${total} iten${total !== 1 ? 's' : ''} concluído${conc !== 1 ? 's' : ''}`;
+  document.getElementById('tf2-progress-bar').style.width = total ? (conc / total * 100) + '%' : '0%';
+  document.getElementById('tf2-btn-fechar').disabled = (conc < total);
+
+  // Agrupar por TAG
+  const byTag = {};
+  itens.forEach(it => {
+    const k = it.tag_equipamento || it.id_equipamento || 'Sem TAG';
+    if (!byTag[k]) byTag[k] = [];
+    byTag[k].push(it);
+  });
+
+  const body = document.getElementById('tf2-body');
+  if (!itens.length) {
+    body.innerHTML = '<div class="empty-state"><div class="ei">📦</div>Nenhum item nesta fase</div>';
+    return;
+  }
+
+  body.innerHTML = Object.entries(byTag).map(([tag, items]) => `
+    <div style="margin:12px 14px 0">
+      <div style="font-size:12px;font-weight:700;color:var(--text2);letter-spacing:.5px;text-transform:uppercase;margin-bottom:6px">🔧 ${tag}</div>
+      ${items.map(it => {
+        const calib = String(it.requer_calibracao) === 'true';
+        const lacre = String(it.requer_lacre) === 'true';
+        const done  = it._concluido;
+        return `<div class="equip-item" style="${done ? 'opacity:.7;background:var(--surf2)' : ''};cursor:pointer;margin-bottom:8px" onclick="${done ? '' : `abrirItemF2('${it.id_item}')`}">
+          <div class="equip-icon" style="font-size:20px">${done ? '✅' : '📦'}</div>
+          <div style="flex:1;min-width:0">
+            <div class="equip-tag" style="font-size:13px">${it.descricao_curta || '—'}</div>
+            <div class="equip-tipo" style="font-size:11px">Qtd: ${it.quantidade}${calib ? ' · ⚙️ Calibração NR-13' : ''}${lacre ? ' · 🔒 Lacre' : ''}</div>
+            ${done && it._dados ? `<div style="font-size:11px;color:var(--ok);margin-top:2px">✓ ${it._dados.acao} · ${it._dados.data}</div>` : ''}
+          </div>
+          ${done ? '' : `<div style="background:var(--primary);color:#fff;font-size:11px;font-weight:700;padding:4px 10px;border-radius:6px;white-space:nowrap">Registrar →</div>`}
+        </div>`;
+      }).join('')}
+    </div>`).join('');
+}
+
+function abrirItemF2(idItem) {
+  const it = _f2Itens.find(i => i.id_item === idItem);
+  if (!it) return;
+  _f2ItemCtx = it;
+
+  document.getElementById('f2item-title').textContent = it.tag_equipamento || 'Item';
+  document.getElementById('f2item-desc').textContent = it.descricao_curta || '—';
+
+  const hoje = new Date().toISOString().split('T')[0];
+  document.getElementById('f2item-data').value = hoje;
+  document.getElementById('f2item-cert').value = '';
+  document.getElementById('f2item-lacre').value = '';
+  document.getElementById('f2item-obs').value = '';
+
+  const calib = String(it.requer_calibracao) === 'true';
+  const lacre = String(it.requer_lacre) === 'true';
+  document.getElementById('f2-calib-block').style.display = calib ? '' : 'none';
+  document.getElementById('f2-lacre-block').style.display = lacre ? '' : 'none';
+
+  // Ajusta opções de ação
+  const sel = document.getElementById('f2item-acao');
+  sel.innerHTML = calib
+    ? '<option value="calibrado">Calibrado + instalado</option><option value="instalado">Instalado (sem calibração)</option>'
+    : '<option value="instalado">Instalado</option><option value="entregue">Entregue ao responsável</option>';
+
+  openDialog('modal-item-f2');
+}
+
+async function confirmarItemF2() {
+  const it = _f2ItemCtx;
+  if (!it) return;
+
+  const acao  = document.getElementById('f2item-acao').value;
+  const data  = document.getElementById('f2item-data').value;
+  const cert  = document.getElementById('f2item-cert').value.trim();
+  const lacre = document.getElementById('f2item-lacre').value.trim();
+  const obs   = document.getElementById('f2item-obs').value.trim();
+
+  if (!data) { showToast('Informe a data de execução', 'err'); return; }
+
+  // Marca item como concluído
+  it._concluido = true;
+  it._dados = { acao, data, cert, lacre, obs };
+  it.status = acao === 'calibrado' ? 'calibrado' : (acao === 'entregue' ? 'entregue' : 'instalado');
+
+  // Envia ao GAS
+  if (GAS_URL) {
+    const payload = {
+      id_item: it.id_item,
+      status: it.status,
+      data_instalacao: data,
+      data_calibracao: acao === 'calibrado' ? data : '',
+      num_certificado: cert,
+      num_lacre: lacre,
+      observacao_fechamento: obs,
+      responsavel: SES.inspetor?.nome || 'Inspetor'
+    };
+    try {
+      await gasPost('registrarInstalacao', payload);
+    } catch(e) {} // Falha silenciosa — dado já está marcado localmente
+  }
+
+  closeDialog('modal-item-f2');
+  renderTF2();
+  showToast('Item registrado ✓');
+}
+
+async function fecharOSFase2() {
+  const total = _f2Itens.length;
+  const conc  = _f2Itens.filter(i => i._concluido).length;
+  if (conc < total) { showToast('Conclua todos os itens primeiro', 'err'); return; }
+
+  showLoading('Fechando OS…');
+  if (GAS_URL) {
+    try {
+      await gasPost('avancarFaseOS', { id_os: SES.os?.id_os, nova_fase: 'encerrada' });
+    } catch(e) {}
+  }
+  hideLoading();
+
+  // Tela de sucesso (reaproveitamos TC)
+  document.getElementById('tc-summary').textContent =
+    `${SES.inspetor?.nome} · ${total} iten${total !== 1 ? 's' : ''} concluído${total !== 1 ? 's' : ''}`;
+  document.getElementById('tc-lev-id').textContent = '✅ OS Encerrada — Fase 2 concluída';
+  goTo('tc');
+}
+
+
 
 // ════════════════════════════════════════════════════════════════
 // HELPERS UI
