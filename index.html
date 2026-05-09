@@ -754,7 +754,7 @@ input[type="number"]::-webkit-inner-spin-button { -webkit-appearance: none; }
 // ════════════════════════════════════════════════════════════════
 // CONFIG — substitua pela URL real do Web App GAS
 // ════════════════════════════════════════════════════════════════
-const GAS_URL = 'https://script.google.com/macros/s/AKfycbyIAi-J0DrEBgRj8fIWQShO9ebvunSA0HMnnSzCEbax20db7x9xJ9L204KwzOHZYsw3mA/exec';
+const GAS_URL = 'https://script.google.com/macros/s/AKfycbyCT8QC_oRMyN8rPbtOkT5W8zQ2MIrHzivixvHGEneV3bp6q7ck-MLXni_ptQdgtCUwxA/exec';
 
 // ════════════════════════════════════════════════════════════════
 // ESTADO DA SESSÃO
@@ -951,7 +951,10 @@ async function afterLogin() {
       gasGet('getOS'),
       gasGet('getCatalogos')
     ]);
-    if (rOs.status === 'ok') SES._osList = rOs.os;
+    if (rOs.status === 'ok') SES._osList = (rOs.os || []).filter(o => {
+      const s = String(o.status || '').toLowerCase();
+      return s !== 'encerrada' && s !== 'encerrado' && s !== 'finalizada';
+    }); // Sprint 6: garante que OS encerrada não apareça no FieldTap
     if (rCat.status === 'ok') {
       SES.catalogo = {
         manometros: rCat.manometros || [],
