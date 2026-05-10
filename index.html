@@ -525,9 +525,9 @@ input[type="number"]::-webkit-inner-spin-button { -webkit-appearance: none; }
   <div class="body" style="display:flex;flex-direction:column;align-items:center;justify-content:center;">
     <p class="sec-label">Quantas unidades?</p>
     <div class="qty-wrap">
-      <div class="qty-btn" onclick="changeQty(-1)">−</div>
+      <div class="qty-btn" id="qtyBtnMinus">−</div>
       <div class="qty-num" id="qtyDisplay">1</div>
-      <div class="qty-btn" onclick="changeQty(1)">+</div>
+      <div class="qty-btn" id="qtyBtnPlus">+</div>
     </div>
     <p style="font-size:13px;color:var(--text3)">Toque e segure para alterar mais rápido</p>
   </div>
@@ -754,7 +754,7 @@ input[type="number"]::-webkit-inner-spin-button { -webkit-appearance: none; }
 // ════════════════════════════════════════════════════════════════
 // CONFIG — substitua pela URL real do Web App GAS
 // ════════════════════════════════════════════════════════════════
-const GAS_URL = 'https://script.google.com/macros/s/AKfycbyCT8QC_oRMyN8rPbtOkT5W8zQ2MIrHzivixvHGEneV3bp6q7ck-MLXni_ptQdgtCUwxA/exec';
+const GAS_URL = 'https://script.google.com/macros/s/AKfycbyIAi-J0DrEBgRj8fIWQShO9ebvunSA0HMnnSzCEbax20db7x9xJ9L204KwzOHZYsw3mA/exec';
 
 // ════════════════════════════════════════════════════════════════
 // ESTADO DA SESSÃO
@@ -1376,13 +1376,36 @@ function changeQty(d) {
   SES.quantidade = Math.max(1, SES.quantidade + d);
   document.getElementById('qtyDisplay').textContent = SES.quantidade;
 }
-// long press
+// Stepper: disparo imediato no primeiro toque + aceleração após 400ms segurando
 document.addEventListener('DOMContentLoaded', () => {
-  document.querySelectorAll('.qty-btn').forEach(btn => {
-    const dir = btn.textContent.trim() === '−' ? -1 : 1;
-    btn.addEventListener('mousedown', () => { qtyHoldTimer = setInterval(() => changeQty(dir), 100); });
-    btn.addEventListener('touchstart', (e) => { e.preventDefault(); qtyHoldTimer = setInterval(() => changeQty(dir), 100); });
-    ['mouseup','mouseleave','touchend'].forEach(ev => btn.addEventListener(ev, () => clearInterval(qtyHoldTimer)));
+  [
+    { id: 'qtyBtnMinus', dir: -1 },
+    { id: 'qtyBtnPlus',  dir:  1 }
+  ].forEach(({ id, dir }) => {
+    const btn = document.getElementById(id);
+    if (!btn) return;
+    let holdTimer = null;
+
+    function startHold() {
+      // Disparo imediato no toque/clique
+      changeQty(dir);
+      // Após 400ms segurando, começa repetição acelerada
+      holdTimer = setTimeout(() => {
+        holdTimer = setInterval(() => changeQty(dir), 80);
+      }, 400);
+    }
+
+    function stopHold() {
+      clearTimeout(holdTimer);
+      clearInterval(holdTimer);
+      holdTimer = null;
+    }
+
+    btn.addEventListener('mousedown', startHold);
+    btn.addEventListener('touchstart', (e) => { e.preventDefault(); startHold(); }, { passive: false });
+    ['mouseup', 'mouseleave', 'touchend', 'touchcancel'].forEach(ev =>
+      btn.addEventListener(ev, stopHold)
+    );
   });
 });
 
