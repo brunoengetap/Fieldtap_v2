@@ -754,7 +754,7 @@ input[type="number"]::-webkit-inner-spin-button { -webkit-appearance: none; }
 // ════════════════════════════════════════════════════════════════
 // CONFIG — substitua pela URL real do Web App GAS
 // ════════════════════════════════════════════════════════════════
-const GAS_URL = 'https://script.google.com/macros/s/AKfycbz4pzeCR3_ww7F2GUUKmqVPjzeTDj49k0vaui41vQeEWFYwpuItIskzPRf7sKYwJ8DL/exec';
+const GAS_URL = 'https://script.google.com/macros/s/AKfycbxGXse5zMb6J7sLyczwWkWf-N5PHcSw3Wp9LUiAzDD8qBgAaXy3omcPlsHsSNBUAYA/exec';
 
 // ════════════════════════════════════════════════════════════════
 // ESTADO DA SESSÃO
@@ -948,13 +948,13 @@ async function afterLogin() {
   // tenta carregar real
   try {
     const [rOs, rCat] = await Promise.all([
-      gasGet('getOS'),
+      gasGet('getOS', { id_inspetor: SES.inspetor.id_inspetor }),
       gasGet('getCatalogos')
     ]);
     if (rOs.status === 'ok') SES._osList = (rOs.os || []).filter(o => {
       const s = String(o.status || '').toLowerCase();
       return s !== 'encerrada' && s !== 'encerrado' && s !== 'finalizada';
-    }); // Sprint 6: garante que OS encerrada não apareça no FieldTap
+    }); // Sprint 8: filtrado pelo técnico no GAS, garante encerradas fora
     if (rCat.status === 'ok') {
       SES.catalogo = {
         manometros: rCat.manometros || [],
@@ -988,12 +988,21 @@ function getDemoOS() {
 // ════════════════════════════════════════════════════════════════
 function renderT2() {
   document.getElementById('t2-inspector-name').textContent = SES.inspetor.nome;
-  const osList = SES._osList || getDemoOS();
+  const allOS = SES._osList || getDemoOS();
+
+  // Sprint 8: separar OS enviadas das pendentes
+  const osEnviadas = SES._osEnviadas || new Set();
+  const osPendentes = allOS.filter(o => !osEnviadas.has(o.id_os));
+  const osJaEnviadas = allOS.filter(o => osEnviadas.has(o.id_os));
+
   const body = document.getElementById('t2-body');
-  if (!osList.length) {
-    body.innerHTML = '<div class="empty-state"><div class="ei">📋</div>Nenhuma OS ativa para hoje</div>';
+  let html = '';
+
+  if (!osPendentes.length && !osJaEnviadas.length) {
+    html = '<div class="empty-state"><div class="ei">📋</div>Nenhuma OS ativa para hoje</div>';
   } else {
-    body.innerHTML = osList.map(o => `
+    if (osPendentes.length) {
+      html += osPendentes.map(o => `
       <div class="os-card" onclick="selectOS('${o.id_os}')">
         <div class="os-num">OS ${o.numero_os || o.id_os}</div>
         <div class="os-cli">🏢 ${o.cliente}</div>
@@ -1004,7 +1013,24 @@ function renderT2() {
           <span class="pill pill-gray">🔧 ${o.total_equipamentos || 0} equipamentos</span>
         </div>
       </div>`).join('');
+    }
+    if (osJaEnviadas.length) {
+      html += `<div style="font-size:11px;font-weight:700;color:var(--text3);text-transform:uppercase;letter-spacing:1px;margin:16px 0 8px;padding:0 4px">✅ Levantamento enviado</div>`;
+      html += osJaEnviadas.map(o => `
+      <div class="os-card" style="opacity:0.6;border:1px dashed var(--ok)">
+        <div style="display:flex;align-items:center;justify-content:space-between">
+          <div>
+            <div class="os-num" style="color:var(--ok)">✓ OS ${o.numero_os || o.id_os}</div>
+            <div class="os-cli">🏢 ${o.cliente}</div>
+            <div class="os-desc">${o.descricao || '—'}</div>
+          </div>
+          <button onclick="event.stopPropagation();cancelarEnvioOS('${o.id_os}')" style="background:var(--surf2);border:1px solid var(--border);border-radius:8px;padding:6px 10px;font-size:12px;cursor:pointer;white-space:nowrap;color:var(--text2)">↩ Cancelar</button>
+        </div>
+      </div>`).join('');
+    }
   }
+
+  body.innerHTML = html;
   goTo('t2');
 }
 
@@ -1606,18 +1632,34 @@ async function enviarLevantamento() {
     itens: allItems
   };
   let levId = 'LEV-' + new Date().getFullYear() + '-' + String(Math.floor(Math.random()*900)+100);
+  let enviado = false;
   try {
     const r = await gasPost('enviarLevantamento', payload);
-    if (r.status === 'ok') levId = r.id_levantamento || levId;
+    if (r.status === 'ok') { levId = r.id_levantamento || levId; enviado = true; }
   } catch(e) {
-    // modo offline — usa id gerado localmente
+    // modo offline — usa id gerado localmente; marca como enviado localmente
+    enviado = true;
   }
   hideLoading();
+
+  // Sprint 8: marca a OS como levantamento enviado para sumir da lista
+  if (enviado && SES._osList) {
+    // Guarda o id da OS como "levantamento enviado" nesta sessão
+    if (!SES._osEnviadas) SES._osEnviadas = new Set();
+    SES._osEnviadas.add(SES.os.id_os);
+  }
+
   // TC
   const agora = `${SES.inspetor.nome} · ${totalItens} item${totalItens>1?'s':''} registrados`;
   document.getElementById('tc-summary').textContent = agora;
   document.getElementById('tc-lev-id').textContent = levId;
   goTo('tc');
+}
+
+function cancelarEnvioOS(idOS) {
+  if (SES._osEnviadas) SES._osEnviadas.delete(idOS);
+  renderT2();
+  showToast('Envio cancelado — OS voltou para a lista');
 }
 
 function novaOS() {
@@ -1638,11 +1680,17 @@ async function entrarFase2(idOS) {
   document.getElementById('tf2-os-num').textContent = 'OS ' + (os?.numero_os || idOS);
   document.getElementById('tf2-cliente').textContent = os?.cliente || '';
 
-  // Tenta buscar itens do GAS
+  // Tenta buscar itens do GAS — aceita pronto_campo e em_campo_f2
   let itens = [];
   try {
-    const r = await gasGet('getItensByOS', { id_os: idOS, status: 'em_campo_f2' });
-    if (r.status === 'ok' && r.itens?.length) itens = r.itens;
+    // Busca em_campo_f2 (após Fase 2 confirmada no TapParts)
+    const r1 = await gasGet('getItensByOS', { id_os: idOS, status: 'em_campo_f2' });
+    if (r1.status === 'ok' && r1.itens?.length) itens = r1.itens;
+    // Fallback: pronto_campo (quando fase 2 foi aberta mas status ainda não atualizado)
+    if (!itens.length) {
+      const r2 = await gasGet('getItensByOS', { id_os: idOS, status: 'pronto_campo' });
+      if (r2.status === 'ok' && r2.itens?.length) itens = r2.itens;
+    }
   } catch(e) {}
 
   // Fallback demo se não trouxe nada
