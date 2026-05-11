@@ -764,7 +764,7 @@ input[type="number"]::-webkit-inner-spin-button { -webkit-appearance: none; }
 // ════════════════════════════════════════════════════════════════
 // CONFIG — substitua pela URL real do Web App GAS
 // ════════════════════════════════════════════════════════════════
-const GAS_URL = 'https://script.google.com/macros/s/AKfycbzR6CPX2JAqxyVywgg9uSoJyZc6kENfK7csXsamnYYf1eN0tJ6my5aAZyUhemO2TqVl/exec';
+const GAS_URL = 'https://script.google.com/macros/s/AKfycbyjCwHvKEBwgOoqtTTKEkhgSI_pRcdmtm97jEkPFdRUQa84OczMeRoeb7MV1gTCCMXo/exec';
 
 // ════════════════════════════════════════════════════════════════
 // ESTADO DA SESSÃO
@@ -967,10 +967,13 @@ async function afterLogin() {
       gasGet('getOS', { id_inspetor: SES.inspetor.id_inspetor }),
       gasGet('getCatalogos')
     ]);
-    if (rOs.status === 'ok') SES._osList = (rOs.os || []).filter(o => {
-      const s = String(o.status || '').toLowerCase();
-      return s !== 'encerrada' && s !== 'encerrado' && s !== 'finalizada';
-    }); // Sprint 8: filtrado pelo técnico no GAS, garante encerradas fora
+    if (rOs.status === 'ok') {
+      SES._osList = (rOs.os || []).filter(o => {
+        const s = String(o.status || '').trim().toLowerCase();
+        return s !== 'encerrada' && s !== 'encerrado' && s !== 'finalizada' && s !== 'finalizado';
+      });
+      SES._gasOSCarregado = true; // GAS respondeu: não usar demo mesmo se lista vazia
+    } // Sprint 8: filtrado pelo técnico no GAS, garante encerradas fora
     if (rCat.status === 'ok') {
       SES.catalogo = {
         manometros: rCat.manometros || [],
@@ -1004,7 +1007,8 @@ function getDemoOS() {
 // ════════════════════════════════════════════════════════════════
 function renderT2() {
   document.getElementById('t2-inspector-name').textContent = SES.inspetor.nome;
-  const allOS = SES._osList || getDemoOS();
+  // Usa demo apenas se GAS não respondeu (modo offline real)
+  const allOS = SES._gasOSCarregado ? (SES._osList || []) : (SES._osList || getDemoOS());
 
   // Sprint 8: separar OS enviadas das pendentes
   const osEnviadas = SES._osEnviadas || new Set();
@@ -1067,12 +1071,14 @@ function renderT2() {
 }
 
 async function selectOS(id) {
-  const osList = SES._osList || getDemoOS();
+  const osList = SES._gasOSCarregado ? (SES._osList || []) : (SES._osList || getDemoOS());
   SES.os = osList.find(o => o.id_os === id);
 
   // S5: Se a OS está na Fase 2, redireciona para o checklist de retorno
-  const fase = String(SES.os?.fase_atual || '1');
-  if (fase === '2') {
+  const fase = String(SES.os?.fase_atual || '1').trim();
+  const statusOS = String(SES.os?.status || '').trim().toLowerCase();
+  const ehFase2 = fase === '2' || statusOS === 'fase 2' || statusOS === 'fase 2 campo concluída';
+  if (ehFase2) {
     await entrarFase2(id);
     return;
   }
@@ -1708,7 +1714,8 @@ let _f2ItemCtx = null;  // item sendo registrado no dialog
 
 async function entrarFase2(idOS) {
   showLoading('Carregando itens da Fase 2…');
-  const os = (SES._osList || getDemoOS()).find(o => o.id_os === idOS);
+  const osList3 = SES._gasOSCarregado ? (SES._osList || []) : (SES._osList || getDemoOS());
+  const os = osList3.find(o => o.id_os === idOS);
   SES.os = os;
   document.getElementById('tf2-os-num').textContent = 'OS ' + (os?.numero_os || idOS);
   document.getElementById('tf2-cliente').textContent = os?.cliente || '';
@@ -1726,8 +1733,8 @@ async function entrarFase2(idOS) {
     }
   } catch(e) {}
 
-  // Fallback demo se não trouxe nada
-  if (!itens.length) {
+  // Fallback demo apenas se GAS falhou (não respondeu). Se GAS respondeu OK com 0 itens, não usar demo.
+  if (!itens.length && !SES._gasOSCarregado) {
     itens = getDemoItensF2(idOS);
   }
 
