@@ -764,7 +764,7 @@ input[type="number"]::-webkit-inner-spin-button { -webkit-appearance: none; }
 // ════════════════════════════════════════════════════════════════
 // CONFIG — substitua pela URL real do Web App GAS
 // ════════════════════════════════════════════════════════════════
-const GAS_URL = 'https://script.google.com/macros/s/AKfycbyjCwHvKEBwgOoqtTTKEkhgSI_pRcdmtm97jEkPFdRUQa84OczMeRoeb7MV1gTCCMXo/exec';
+const GAS_URL = 'https://script.google.com/macros/s/AKfycbzEN9w-uxxa2YfrR7FvaAfx1YzmMbnTvgGaIt5kiQTHroUbRP1PODr0pRcKIrZZ2WQo/exec';
 
 // ════════════════════════════════════════════════════════════════
 // ESTADO DA SESSÃO
@@ -840,10 +840,23 @@ function loadDemoData() {
 async function gasGet(action, params={}) {
   const url = new URL(GAS_URL);
   url.searchParams.set('action', action);
+  // Correção S10 — cache-buster obrigatório
+  url.searchParams.set('_ts', Date.now());
   Object.entries(params).forEach(([k,v]) => url.searchParams.set(k, v));
-  const timeout = new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), 8000));
-  const r = await Promise.race([fetch(url, { redirect: 'follow' }), timeout]);
-  return r.json();
+  // Correção S10 — timeout aumentado para 15s (mobile GAS pode ser lento)
+  const mkFetch = () => Promise.race([
+    fetch(url, { redirect: 'follow' }),
+    new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), 15000))
+  ]);
+  try {
+    const r = await mkFetch();
+    return r.json();
+  } catch(e1) {
+    // Correção S10 — 1 retry após 700ms antes de desistir
+    await new Promise(res => setTimeout(res, 700));
+    const r2 = await mkFetch();
+    return r2.json();
+  }
 }
 
 async function gasPost(action, data={}) {
@@ -960,8 +973,18 @@ function pinError() {
 async function afterLogin() {
   document.getElementById('pinStatus').textContent = 'Bem-vindo, ' + SES.inspetor.nome + '! Carregando…';
   setGASStatus('spin', 'Carregando dados…');
-  loadDemoData(); // carrega demo
-  // tenta carregar real
+  // Correção S10 — refresh FieldTap sem demo em produção
+  // DEMO_MODE ativo apenas quando GAS_URL estiver vazio ou placeholder
+  const DEMO_MODE = !GAS_URL || GAS_URL.includes('COLE_AQUI') || GAS_URL.trim() === '';
+  if (DEMO_MODE) {
+    loadDemoData();
+    SES._osList = getDemoOS();
+    setGASStatus('', 'Modo demo local');
+    renderT2();
+    return;
+  }
+  // Em produção: carregar do GAS sem fallback para demo
+  loadDemoData(); // carrega catálogos demo como fallback apenas para catálogos, não OS
   try {
     const [rOs, rCat] = await Promise.all([
       gasGet('getOS', { id_inspetor: SES.inspetor.id_inspetor }),
@@ -972,8 +995,8 @@ async function afterLogin() {
         const s = String(o.status || '').trim().toLowerCase();
         return s !== 'encerrada' && s !== 'encerrado' && s !== 'finalizada' && s !== 'finalizado';
       });
-      SES._gasOSCarregado = true; // GAS respondeu: não usar demo mesmo se lista vazia
-    } // Sprint 8: filtrado pelo técnico no GAS, garante encerradas fora
+      SES._gasOSCarregado = true; // GAS respondeu: nunca usar demo para OS
+    }
     if (rCat.status === 'ok') {
       SES.catalogo = {
         manometros: rCat.manometros || [],
@@ -987,8 +1010,10 @@ async function afterLogin() {
     }
     setGASStatus('ok', 'GAS conectado ✓');
   } catch(e) {
-    setGASStatus('err', 'Modo offline — dados demo');
-    SES._osList = getDemoOS();
+    // Correção S10 — em produção GAS falhou: NÃO carregar demo de OS, mostrar erro claro
+    setGASStatus('err', 'Falha ao conectar GAS');
+    // SES._osList permanece vazio; SES._gasOSCarregado permanece false
+    // renderT2 mostrará estado de erro com botão Atualizar
   }
   if (!SES.kits || !SES.kits.length) SES.kits = SES.catalogo.kits || [];
   renderT2();
@@ -1005,10 +1030,57 @@ function getDemoOS() {
 // ════════════════════════════════════════════════════════════════
 // T2 — OS
 // ════════════════════════════════════════════════════════════════
+
+// Correção S10 — refresh FieldTap sem demo em produção
+// Timestamp da última atualização para debounce no visibilitychange
+let _lastOSRefresh = 0;
+
+async function atualizarOSFieldTap(btn) {
+  const DEMO_MODE = !GAS_URL || GAS_URL.includes('COLE_AQUI') || GAS_URL.trim() === '';
+  if (DEMO_MODE) return; // em demo local não faz sentido atualizar
+  if (btn) { btn.disabled = true; btn.textContent = '⏳'; }
+  setGASStatus('spin', 'Atualizando OS…');
+  try {
+    const r = await gasGet('getOS', { id_inspetor: SES.inspetor.id_inspetor });
+    if (r.status === 'ok') {
+      SES._osList = (r.os || []).filter(o => {
+        const s = String(o.status || '').trim().toLowerCase();
+        return s !== 'encerrada' && s !== 'encerrado' && s !== 'finalizada' && s !== 'finalizado';
+      });
+      SES._gasOSCarregado = true;
+      _lastOSRefresh = Date.now();
+      setGASStatus('ok', 'GAS conectado ✓');
+      renderT2();
+      showToast('OS atualizadas ✓');
+    } else {
+      throw new Error(r.mensagem || 'GAS retornou erro');
+    }
+  } catch(e) {
+    setGASStatus('err', 'Falha ao atualizar GAS');
+    showToast('Falha ao atualizar. Verifique conexão e tente novamente.', 'err');
+    // NÃO limpa lista real já carregada, NÃO carrega demo
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = '🔄'; }
+  }
+}
+
+// Auto-refresh seguro ao voltar para o app (debounce 10s)
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden) return;
+  if (!SES.inspetor) return; // não logado
+  const screen = document.querySelector('.screen:not(.hidden)');
+  if (!screen || screen.id !== 'scr-t2') return; // só na T2
+  if (Date.now() - _lastOSRefresh < 10000) return; // debounce 10s
+  atualizarOSFieldTap(null);
+});
+
 function renderT2() {
   document.getElementById('t2-inspector-name').textContent = SES.inspetor.nome;
-  // Usa demo apenas se GAS não respondeu (modo offline real)
-  const allOS = SES._gasOSCarregado ? (SES._osList || []) : (SES._osList || getDemoOS());
+  // Correção S10 — em produção (GAS_URL configurado) NUNCA mostrar demo para OS
+  const DEMO_MODE = !GAS_URL || GAS_URL.includes('COLE_AQUI') || GAS_URL.trim() === '';
+  const allOS = DEMO_MODE
+    ? (SES._osList || getDemoOS())  // modo demo local: ok usar demo
+    : (SES._osList || []);          // produção: apenas lista real (nunca demo)
 
   // Sprint 8: separar OS enviadas das pendentes
   const osEnviadas = SES._osEnviadas || new Set();
@@ -1018,10 +1090,38 @@ function renderT2() {
   const osF2Done     = allOS.filter(o => osF2Conc.has(o.id_os));
 
   const body = document.getElementById('t2-body');
+  // Botão Atualizar — injetado no header da T2
+  const hdrBadge = document.querySelector('#scr-t2 .hdr-badge');
+  if (hdrBadge && !document.getElementById('t2-refresh-btn')) {
+    const btn = document.createElement('button');
+    btn.id = 't2-refresh-btn';
+    btn.textContent = '🔄';
+    btn.title = 'Atualizar OS';
+    btn.style.cssText = 'background:none;border:1px solid var(--border);border-radius:8px;padding:4px 10px;font-size:18px;cursor:pointer;color:var(--text1);margin-left:8px;';
+    btn.onclick = () => atualizarOSFieldTap(btn);
+    hdrBadge.insertAdjacentElement('afterend', btn);
+  }
+
   let html = '';
 
+  // Correção S10 — se GAS configurado mas ainda não respondeu, mostrar estado de erro com botão Atualizar
+  const gasConfigurado = !DEMO_MODE;
+  const gasNaoRespondeu = gasConfigurado && !SES._gasOSCarregado;
+  if (gasNaoRespondeu) {
+    html = `<div class="empty-state" style="padding:32px 16px">
+      <div class="ei">📡</div>
+      <div style="margin-bottom:12px">Não foi possível conectar ao GAS.<br>Toque em Atualizar para tentar novamente.</div>
+      <button onclick="atualizarOSFieldTap(this)" style="background:var(--accent);color:#fff;border:none;border-radius:10px;padding:10px 24px;font-size:15px;cursor:pointer;font-weight:600">🔄 Atualizar</button>
+    </div>`;
+    body.innerHTML = html;
+    return;
+  }
+
   if (!osPendentes.length && !osJaEnviadas.length && !osF2Done.length) {
-    html = '<div class="empty-state"><div class="ei">📋</div>Nenhuma OS ativa para hoje</div>';
+    html = `<div class="empty-state">
+      <div class="ei">📋</div>Nenhuma OS ativa para hoje
+      ${gasConfigurado ? '<br><button onclick="atualizarOSFieldTap(this)" style="margin-top:12px;background:var(--surf2);border:1px solid var(--border);border-radius:8px;padding:8px 18px;font-size:14px;cursor:pointer">🔄 Atualizar</button>' : ''}
+    </div>`;
   } else {
     if (osPendentes.length) {
       html += osPendentes.map(o => `
@@ -1047,8 +1147,7 @@ function renderT2() {
             <div class="os-desc">${o.descricao || '—'}</div>
           </div>
           <button onclick="event.stopPropagation();cancelarEnvioOS('${o.id_os}')" style="background:var(--surf2);border:1px solid var(--border);border-radius:8px;padding:6px 10px;font-size:12px;cursor:pointer;white-space:nowrap;color:var(--text2)">↩ Cancelar</button>
-        </div>
-      </div>`).join('');
+        </div>      </div>`).join('');
     }
     if (osF2Done.length) {
       html += `<div style="font-size:11px;font-weight:700;color:var(--text3);text-transform:uppercase;letter-spacing:1px;margin:16px 0 8px;padding:0 4px">✅ Fase 2 concluída</div>`;
@@ -1071,7 +1170,8 @@ function renderT2() {
 }
 
 async function selectOS(id) {
-  const osList = SES._gasOSCarregado ? (SES._osList || []) : (SES._osList || getDemoOS());
+  const DEMO_MODE = !GAS_URL || GAS_URL.includes('COLE_AQUI') || GAS_URL.trim() === '';
+  const osList = SES._gasOSCarregado ? (SES._osList || []) : (DEMO_MODE ? (SES._osList || getDemoOS()) : (SES._osList || []));
   SES.os = osList.find(o => o.id_os === id);
 
   // S5: Se a OS está na Fase 2, redireciona para o checklist de retorno
@@ -1086,13 +1186,26 @@ async function selectOS(id) {
   SES.levantamento = {};
   showLoading('Carregando equipamentos…');
   let equips = [];
+  // Correção S10 — busca de equipamentos sem demo em produção
   try {
     const r = await gasGet('getEquipamentosByOS', { id_os: id });
-    if (r.status === 'ok') equips = r.equipamentos;
+    if (r.status === 'ok') {
+      equips = r.equipamentos || [];
+      // Se lista vazia em produção: NÃO usar demo, mostrar mensagem clara na T3
+      SES._equipGASCarregado = true;
+    } else {
+      throw new Error(r.mensagem || 'GAS retornou erro');
+    }
   } catch(e) {
-    equips = getDemoEquips(id);
+    // GAS falhou: em produção não usa demo, em demo usa demo
+    if (DEMO_MODE) {
+      equips = getDemoEquips(id);
+    } else {
+      equips = [];
+      SES._equipGASCarregado = false;
+      SES._equipGASErro = true;
+    }
   }
-  if (!equips.length) equips = getDemoEquips(id);
   SES.equipamentos = equips;
   hideLoading();
   renderT3();
@@ -1109,22 +1222,51 @@ function getDemoEquips(id_os) {
 }
 
 // ════════════════════════════════════════════════════════════════
-// T3 — EQUIPAMENTOS
-// ════════════════════════════════════════════════════════════════
-const EQUIP_ICON = { vaso:'🔵', caldeira:'🔥', tubulacao:'〰️', tanque:'🛢️' };
-const EQUIP_TIPO_LABEL = { vaso:'Vaso de pressão', caldeira:'Caldeira', tubulacao:'Tubulação', tanque:'Tanque' };
+// Correção S10 — atualizar equipamentos da OS sem demo em produção
+async function atualizarEquipamentosOS(btn) {
+  if (!SES.os) return;
+  const DEMO_MODE = !GAS_URL || GAS_URL.includes('COLE_AQUI') || GAS_URL.trim() === '';
+  if (DEMO_MODE) return;
+  if (btn) { btn.disabled = true; btn.textContent = '⏳'; }
+  try {
+    const r = await gasGet('getEquipamentosByOS', { id_os: SES.os.id_os });
+    if (r.status === 'ok') {
+      SES.equipamentos = r.equipamentos || [];
+      SES._equipGASCarregado = true;
+      SES._equipGASErro = false;
+      renderT3();
+      showToast('Equipamentos atualizados ✓');
+    } else {
+      throw new Error(r.mensagem || 'GAS retornou erro');
+    }
+  } catch(e) {
+    showToast('Falha ao atualizar equipamentos. Tente novamente.', 'err');
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = '🔄 Atualizar equipamentos'; }
+  }
+}
 
 function renderT3() {
   document.getElementById('t3-os-num').textContent = 'OS ' + (SES.os.numero_os || SES.os.id_os);
   document.getElementById('t3-cliente').textContent = SES.os.cliente;
   const body = document.getElementById('t3-body');
   const equips = SES.equipamentos;
+  const DEMO_MODE = !GAS_URL || GAS_URL.includes('COLE_AQUI') || GAS_URL.trim() === '';
   let html = `<div class="add-equip-btn" onclick="openNovoEquip()">
     <span class="ae-icon">➕</span>
     <span class="ae-label">Cadastrar novo equipamento</span>
   </div>`;
   if (!equips.length) {
-    html += '<div class="empty-state"><div class="ei">🔧</div>Nenhum equipamento nesta OS ainda</div>';
+    // Correção S10 — mensagem clara quando GAS configurado mas lista vazia (sem demo)
+    if (!DEMO_MODE) {
+      html += `<div class="empty-state" style="padding:24px 16px">
+        <div class="ei">🔧</div>
+        <div style="margin-bottom:12px">Nenhum equipamento vinculado a esta OS.<br>Atualize ou verifique o vínculo no TapParts.</div>
+        <button onclick="atualizarEquipamentosOS(this)" style="background:var(--surf2);border:1px solid var(--border);border-radius:8px;padding:8px 18px;font-size:14px;cursor:pointer">🔄 Atualizar equipamentos</button>
+      </div>`;
+    } else {
+      html += '<div class="empty-state"><div class="ei">🔧</div>Nenhum equipamento nesta OS ainda</div>';
+    }
   } else {
     html += equips.map(e => {
       const items = SES.levantamento[e.id_equipamento] || [];
@@ -1141,6 +1283,10 @@ function renderT3() {
         <div class="equip-arrow">›</div>
       </div>`;
     }).join('');
+    // Botão de atualizar sempre visível em produção
+    if (!DEMO_MODE) {
+      html += `<div style="text-align:center;margin:16px 0"><button onclick="atualizarEquipamentosOS(this)" style="background:var(--surf2);border:1px solid var(--border);border-radius:8px;padding:8px 18px;font-size:14px;cursor:pointer">🔄 Atualizar equipamentos</button></div>`;
+    }
   }
   body.innerHTML = html;
   goTo('t3');
