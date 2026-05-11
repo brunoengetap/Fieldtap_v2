@@ -841,18 +841,23 @@ async function gasGet(action, params={}) {
   const url = new URL(GAS_URL);
   url.searchParams.set('action', action);
   Object.entries(params).forEach(([k,v]) => url.searchParams.set(k, v));
-  const r = await fetch(url, { redirect: 'follow' });
+  const timeout = new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), 8000));
+  const r = await Promise.race([fetch(url, { redirect: 'follow' }), timeout]);
   return r.json();
 }
 
 async function gasPost(action, data={}) {
   const url = new URL(GAS_URL);
   url.searchParams.set('action', action);
-  const r = await fetch(url, {
-    method: 'POST',
-    body: JSON.stringify({ action, ...data }),
-    redirect: 'follow'
-  });
+  const timeout = new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), 10000));
+  const r = await Promise.race([
+    fetch(url, {
+      method: 'POST',
+      body: JSON.stringify({ action, ...data }),
+      redirect: 'follow'
+    }),
+    timeout
+  ]);
   return r.json();
 }
 
@@ -935,7 +940,8 @@ async function keyOk() {
         pinError();
       }
     } catch(e) {
-      // fallback demo
+      // GAS inacessível ou timeout — fallback demo
+      document.getElementById('pinStatus').textContent = 'GAS indisponível — modo demo';
       if (pin === '1234') { SES.inspetor = { id_inspetor:'INS-001', nome:'João Silva' }; afterLogin(); }
       else if (pin === '5678') { SES.inspetor = { id_inspetor:'INS-002', nome:'Maria Oliveira' }; afterLogin(); }
       else pinError();
