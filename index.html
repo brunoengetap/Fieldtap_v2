@@ -245,6 +245,15 @@ html, body { height: 100%; overflow: hidden; background: var(--bg); color: var(-
 input[type="number"] { -moz-appearance: textfield; }
 input[type="number"]::-webkit-outer-spin-button,
 input[type="number"]::-webkit-inner-spin-button { -webkit-appearance: none; }
+
+/* ── BUTTON LOADING STATE ── */
+.btn-loading { position: relative; pointer-events: none; opacity: .75; }
+.btn-loading::after { content: ''; position: absolute; right: 14px; top: 50%; transform: translateY(-50%); width: 16px; height: 16px; border: 2px solid rgba(255,255,255,.4); border-top-color: #fff; border-radius: 50%; animation: spin .6s linear infinite; }
+.btn-loading span { opacity: 0; }
+
+/* ── PULL TO REFRESH ── */
+.ptr-indicator { text-align: center; padding: 12px; font-size: 12px; color: var(--text3); display: none; }
+.ptr-indicator.visible { display: block; }
 </style>
 </head>
 <body>
@@ -607,7 +616,7 @@ input[type="number"]::-webkit-inner-spin-button { -webkit-appearance: none; }
   </div>
   <div class="body" id="tr-body"></div>
   <div class="bot bot-single">
-    <button class="btn btn-primary" onclick="enviarLevantamento()">📤 Enviar Levantamento</button>
+    <button class="btn btn-primary" onclick="enviarLevantamento(this)">📤 Enviar Levantamento</button>
   </div>
 </div>
 
@@ -645,7 +654,7 @@ input[type="number"]::-webkit-inner-spin-button { -webkit-appearance: none; }
       <div class="hdr-title" id="tf2-os-num">OS —</div>
       <div class="hdr-sub" id="tf2-cliente">Cliente</div>
     </div>
-    <div class="hdr-badge" style="background:var(--accent2,#1F7A3C)">F2</div>
+    <button onclick="recarregarItensF2()" style="background:var(--surf2);border:1px solid var(--border);border-radius:8px;padding:6px 10px;font-size:12px;cursor:pointer;color:var(--text2);white-space:nowrap" title="Atualizar itens">🔄 Atualizar</button>
   </div>
   <div style="padding:10px 14px 0;background:var(--hdr);border-bottom:1px solid var(--border)">
     <div style="font-size:11px;font-weight:700;color:var(--ok);letter-spacing:.5px;text-transform:uppercase;margin-bottom:4px">📦 Fase 2 — Retorno ao Campo</div>
@@ -654,9 +663,10 @@ input[type="number"]::-webkit-inner-spin-button { -webkit-appearance: none; }
       <div id="tf2-progress-bar" style="height:4px;background:var(--ok);border-radius:4px;width:0%;transition:width .3s"></div>
     </div>
   </div>
+  <div id="ptr-indicator" class="ptr-indicator">↓ Puxe para atualizar</div>
   <div class="body" id="tf2-body" style="padding-bottom:80px"></div>
   <div class="bot bot-single">
-    <button class="btn btn-primary" id="tf2-btn-fechar" onclick="fecharOSFase2()" disabled>✅ Finalizar e Fechar OS</button>
+    <button class="btn btn-primary" id="tf2-btn-fechar" onclick="fecharOSFase2(this)" disabled>✅ Finalizar e Fechar OS</button>
   </div>
 </div>
 
@@ -693,7 +703,7 @@ input[type="number"]::-webkit-inner-spin-button { -webkit-appearance: none; }
     </div>
     <div class="dialog-foot">
       <button class="btn btn-ghost btn-sm" style="flex:1" onclick="closeDialog('modal-item-f2')">Cancelar</button>
-      <button class="btn btn-primary btn-sm" style="flex:2" onclick="confirmarItemF2()">✅ Confirmar</button>
+      <button class="btn btn-primary btn-sm" style="flex:2" onclick="confirmarItemF2(this)">✅ Confirmar</button>
     </div>
   </div>
 </div>
@@ -754,7 +764,7 @@ input[type="number"]::-webkit-inner-spin-button { -webkit-appearance: none; }
 // ════════════════════════════════════════════════════════════════
 // CONFIG — substitua pela URL real do Web App GAS
 // ════════════════════════════════════════════════════════════════
-const GAS_URL = 'https://script.google.com/macros/s/AKfycby1Aa2timPdO-L8uRkgpO9LOLgJ1afS8tWiRqF8FzXDsA4AM35XG9oVrP_zrLfewRpO/exec';
+const GAS_URL = 'https://script.google.com/macros/s/AKfycbzR6CPX2JAqxyVywgg9uSoJyZc6kENfK7csXsamnYYf1eN0tJ6my5aAZyUhemO2TqVl/exec';
 
 // ════════════════════════════════════════════════════════════════
 // ESTADO DA SESSÃO
@@ -992,13 +1002,15 @@ function renderT2() {
 
   // Sprint 8: separar OS enviadas das pendentes
   const osEnviadas = SES._osEnviadas || new Set();
-  const osPendentes = allOS.filter(o => !osEnviadas.has(o.id_os));
+  const osF2Conc   = SES._osF2Concluidas || new Set();
+  const osPendentes  = allOS.filter(o => !osEnviadas.has(o.id_os) && !osF2Conc.has(o.id_os));
   const osJaEnviadas = allOS.filter(o => osEnviadas.has(o.id_os));
+  const osF2Done     = allOS.filter(o => osF2Conc.has(o.id_os));
 
   const body = document.getElementById('t2-body');
   let html = '';
 
-  if (!osPendentes.length && !osJaEnviadas.length) {
+  if (!osPendentes.length && !osJaEnviadas.length && !osF2Done.length) {
     html = '<div class="empty-state"><div class="ei">📋</div>Nenhuma OS ativa para hoje</div>';
   } else {
     if (osPendentes.length) {
@@ -1025,6 +1037,20 @@ function renderT2() {
             <div class="os-desc">${o.descricao || '—'}</div>
           </div>
           <button onclick="event.stopPropagation();cancelarEnvioOS('${o.id_os}')" style="background:var(--surf2);border:1px solid var(--border);border-radius:8px;padding:6px 10px;font-size:12px;cursor:pointer;white-space:nowrap;color:var(--text2)">↩ Cancelar</button>
+        </div>
+      </div>`).join('');
+    }
+    if (osF2Done.length) {
+      html += `<div style="font-size:11px;font-weight:700;color:var(--text3);text-transform:uppercase;letter-spacing:1px;margin:16px 0 8px;padding:0 4px">✅ Fase 2 concluída</div>`;
+      html += osF2Done.map(o => `
+      <div class="os-card" style="opacity:0.55;border:1px dashed var(--ok)">
+        <div style="display:flex;align-items:center;justify-content:space-between">
+          <div>
+            <div class="os-num" style="color:var(--ok)">✅ OS ${o.numero_os || o.id_os}</div>
+            <div class="os-cli">🏢 ${o.cliente}</div>
+            <div class="os-desc">${o.descricao || '—'} · Fase 2 concluída</div>
+          </div>
+          <button onclick="event.stopPropagation();cancelarFechamentoFase2('${o.id_os}')" style="background:var(--surf2);border:1px solid var(--border);border-radius:8px;padding:6px 10px;font-size:12px;cursor:pointer;white-space:nowrap;color:var(--text2)">↩ Cancelar</button>
         </div>
       </div>`).join('');
     }
@@ -1616,10 +1642,11 @@ function addItemToEquip(eqId) {
 // ════════════════════════════════════════════════════════════════
 // ENVIAR LEVANTAMENTO
 // ════════════════════════════════════════════════════════════════
-async function enviarLevantamento() {
+async function enviarLevantamento(btn) {
   const lev = SES.levantamento;
   const totalItens = Object.values(lev).reduce((s,a)=>s+a.length,0);
   if (totalItens === 0) { showToast('Nenhum item registrado', 'err'); return; }
+  if (btn) btnLoading(btn, 3000);
   showLoading('Enviando levantamento…');
   const allItems = [];
   Object.values(lev).forEach(items => items.forEach(it => allItems.push(it)));
@@ -1680,11 +1707,11 @@ async function entrarFase2(idOS) {
   document.getElementById('tf2-os-num').textContent = 'OS ' + (os?.numero_os || idOS);
   document.getElementById('tf2-cliente').textContent = os?.cliente || '';
 
-  // Tenta buscar itens do GAS — aceita pronto_campo e em_campo_f2
+  // Tenta buscar itens do GAS — aceita em_campo_f2, instalado, calibrado, entregue
   let itens = [];
   try {
-    // Busca em_campo_f2 (após Fase 2 confirmada no TapParts)
-    const r1 = await gasGet('getItensByOS', { id_os: idOS, status: 'em_campo_f2' });
+    // Busca todos os status relevantes da Fase 2 em uma só chamada
+    const r1 = await gasGet('getItensByOS', { id_os: idOS, status: 'em_campo_f2,instalado,calibrado,entregue' });
     if (r1.status === 'ok' && r1.itens?.length) itens = r1.itens;
     // Fallback: pronto_campo (quando fase 2 foi aberta mas status ainda não atualizado)
     if (!itens.length) {
@@ -1699,12 +1726,24 @@ async function entrarFase2(idOS) {
   }
 
   // Adicionar campo de controle local
-  itens.forEach(it => { it._concluido = false; it._dados = null; });
+  // Itens que já têm status final (vindos do GAS após registro) são marcados como concluídos
+  var STATUS_CONCLUIDOS_F2 = ['instalado', 'calibrado', 'entregue'];
+  itens.forEach(it => {
+    var jaFinalizado = STATUS_CONCLUIDOS_F2.indexOf(it.status) >= 0;
+    it._concluido = jaFinalizado;
+    it._dados = jaFinalizado ? { acao: it.status, data: it.data_instalacao || it.data_calibracao || '—', cert: it.num_certificado || '', lacre: it.num_lacre || '', obs: '' } : null;
+  });
   _f2Itens = itens;
 
   hideLoading();
   renderTF2();
   goTo('tf2');
+  // Inicializa pull-to-refresh na tela de Fase 2
+  const tf2Body = document.getElementById('tf2-body');
+  if (tf2Body && !tf2Body._ptrInit) {
+    initPullToRefresh(tf2Body);
+    tf2Body._ptrInit = true;
+  }
 }
 
 function getDemoItensF2(idOS) {
@@ -1793,7 +1832,7 @@ function abrirItemF2(idItem) {
   openDialog('modal-item-f2');
 }
 
-async function confirmarItemF2() {
+async function confirmarItemF2(btn) {
   const it = _f2ItemCtx;
   if (!it) return;
 
@@ -1804,6 +1843,8 @@ async function confirmarItemF2() {
   const obs   = document.getElementById('f2item-obs').value.trim();
 
   if (!data) { showToast('Informe a data de execução', 'err'); return; }
+
+  if (btn) btnLoading(btn, 1500);
 
   // Marca item como concluído
   it._concluido = true;
@@ -1832,11 +1873,12 @@ async function confirmarItemF2() {
   showToast('Item registrado ✓');
 }
 
-async function fecharOSFase2() {
+async function fecharOSFase2(btn) {
   const total = _f2Itens.length;
   const conc  = _f2Itens.filter(i => i._concluido).length;
   if (conc < total) { showToast('Conclua todos os itens primeiro', 'err'); return; }
 
+  if (btn) btnLoading(btn, 2500);
   showLoading('Finalizando Fase 2…');
   if (GAS_URL) {
     try {
@@ -1846,11 +1888,18 @@ async function fecharOSFase2() {
   }
   hideLoading();
 
-  // Tela de sucesso (reaproveitamos TC)
-  document.getElementById('tc-summary').textContent =
-    `${SES.inspetor?.nome} · ${total} iten${total !== 1 ? 's' : ''} concluído${total !== 1 ? 's' : ''}`;
-  document.getElementById('tc-lev-id').textContent = '✅ Fase 2 Concluída — OS retornada ao escritório';
-  goTo('tc');
+  // Marca a OS como fase 2 concluída nesta sessão (igual ao padrão _osEnviadas da Fase 1)
+  if (!SES._osF2Concluidas) SES._osF2Concluidas = new Set();
+  SES._osF2Concluidas.add(SES.os?.id_os);
+
+  showToast('✅ Fase 2 concluída — OS retornada ao escritório');
+  renderT2();
+}
+
+function cancelarFechamentoFase2(idOS) {
+  if (SES._osF2Concluidas) SES._osF2Concluidas.delete(idOS);
+  renderT2();
+  showToast('Fechamento cancelado — OS voltou para a lista');
 }
 
 
@@ -1863,6 +1912,73 @@ function closeDialog(id) { document.getElementById(id).classList.remove('open');
 document.addEventListener('click', e => {
   if (e.target.classList.contains('dialog-overlay')) e.target.classList.remove('open');
 });
+
+// Loading state em botão: adiciona spinner e desabilita por duração mínima
+function btnLoading(btn, ms=800) {
+  if (!btn) return;
+  btn.classList.add('btn-loading');
+  btn.disabled = true;
+  setTimeout(() => {
+    btn.classList.remove('btn-loading');
+    btn.disabled = false;
+  }, ms);
+}
+
+// ── Pull-to-refresh na tela TF2 ────────────────────────────────
+let _ptrStart = 0;
+let _ptrActive = false;
+function initPullToRefresh(bodyEl) {
+  bodyEl.addEventListener('touchstart', e => {
+    if (bodyEl.scrollTop === 0) { _ptrStart = e.touches[0].clientY; _ptrActive = true; }
+  }, { passive: true });
+  bodyEl.addEventListener('touchmove', e => {
+    if (!_ptrActive) return;
+    const delta = e.touches[0].clientY - _ptrStart;
+    const ind = document.getElementById('ptr-indicator');
+    if (delta > 40 && ind) ind.classList.add('visible');
+  }, { passive: true });
+  bodyEl.addEventListener('touchend', e => {
+    if (!_ptrActive) return;
+    _ptrActive = false;
+    const delta = (e.changedTouches[0]?.clientY || _ptrStart) - _ptrStart;
+    const ind = document.getElementById('ptr-indicator');
+    if (ind) ind.classList.remove('visible');
+    if (delta > 60 && SES.os) {
+      showToast('Atualizando…', 'warn');
+      recarregarItensF2();
+    }
+  });
+}
+
+async function recarregarItensF2() {
+  if (!SES.os) return;
+  showLoading('Atualizando itens…');
+  let itens = [];
+  try {
+    const r1 = await gasGet('getItensByOS', { id_os: SES.os.id_os, status: 'em_campo_f2,instalado,calibrado,entregue' });
+    if (r1.status === 'ok' && r1.itens?.length) itens = r1.itens;
+    if (!itens.length) {
+      const r2 = await gasGet('getItensByOS', { id_os: SES.os.id_os, status: 'pronto_campo' });
+      if (r2.status === 'ok' && r2.itens?.length) itens = r2.itens;
+    }
+  } catch(e) {}
+  hideLoading();
+  if (itens.length) {
+    const STATUS_CONCLUIDOS_F2 = ['instalado', 'calibrado', 'entregue'];
+    itens.forEach(it => {
+      const old = _f2Itens.find(o => o.id_item === it.id_item);
+      // Preserva marcação local, ou detecta status final vindo do GAS
+      const jaFinalizado = STATUS_CONCLUIDOS_F2.indexOf(it.status) >= 0;
+      it._concluido = (old?._concluido || false) || jaFinalizado;
+      it._dados = old?._dados || (jaFinalizado ? { acao: it.status, data: it.data_instalacao || it.data_calibracao || '—', cert: it.num_certificado || '', lacre: it.num_lacre || '', obs: '' } : null);
+    });
+    _f2Itens = itens;
+    renderTF2();
+    showToast('Itens atualizados ✓');
+  } else {
+    showToast('Nenhum item novo encontrado', 'warn');
+  }
+}
 
 function showLoading(txt='Aguarde…') {
   document.getElementById('loadingTxt').textContent = txt;
