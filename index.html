@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-<title>FieldTap S12 — Engetap</title>
+<title>FieldTap S13 — Engetap</title>
 <link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@600;700;800&family=Barlow:wght@400;500;600;700&display=swap" rel="stylesheet">
 <style>
 :root {
@@ -270,7 +270,7 @@ input[type="number"]::-webkit-inner-spin-button { -webkit-appearance: none; }
     <div class="pin-logo">
       <div class="pl-badge">FIELD</div>
       <div class="pl-name">Tap</div>
-      <div class="pl-sub">Engetap · S12</div>
+      <div class="pl-sub">Engetap · S13</div>
     </div>
     <div class="pin-dots" id="pinDots">
       <div class="pin-dot" id="pd0"></div>
@@ -767,7 +767,7 @@ input[type="number"]::-webkit-inner-spin-button { -webkit-appearance: none; }
 const GAS_URL = 'https://script.google.com/macros/s/AKfycbzUFHKIWPWC9EnrQyk-5GaWJ6BgeFdIQ5FLeFo4UAfKP4Qx86b2jM52yWgG-XpIz86Y/exec';
 
 // Correção S12 — versionamento
-const APP_VERSION = 'S12';
+const APP_VERSION = 'S13';
 
 // ════════════════════════════════════════════════════════════════
 // ESTADO DA SESSÃO
@@ -1143,7 +1143,7 @@ function renderT2() {
   } else {
     if (osPendentes.length) {
       html += osPendentes.map(o => `
-      <div class="os-card" onclick="selectOS('${o.id_os}')">
+      <div class="os-card" data-os-id="${encodeURIComponent(String(o.id_os))}">
         <div class="os-num">OS ${o.numero_os || o.id_os}</div>
         <div class="os-cli">🏢 ${o.cliente}</div>
         <div class="os-desc">${o.descricao || '—'}</div>
@@ -1184,6 +1184,12 @@ function renderT2() {
   }
 
   body.innerHTML = html;
+  // Correção S13 — clique delegado nos cards de OS pendentes (evita quebra por id_os com
+  // caracteres especiais ou tipos numéricos vindos do Google Sheets quando interpolados
+  // diretamente em onclick="selectOS('...')").
+  body.querySelectorAll('.os-card[data-os-id]').forEach(card => {
+    card.addEventListener('click', () => selectOS(decodeURIComponent(card.dataset.osId)));
+  });
   goTo('t2');
 }
 
@@ -2182,7 +2188,11 @@ function showToast(msg, type='') {
 
 function fmtDate(d) {
   if (!d) return '—';
-  const [y,m,dd] = String(d).split('-');
+  // Correção S13 — Google Sheets serializa datas como ISO: "2026-05-11T03:00:00.000Z"
+  // split('-') produzia dd="11T03:00:00.000Z"; extrair apenas os 10 primeiros chars
+  const s = String(d).slice(0, 10); // "YYYY-MM-DD"
+  const [y, m, dd] = s.split('-');
+  if (!y || !m || !dd) return String(d);
   return `${dd}/${m}/${y}`;
 }
 
