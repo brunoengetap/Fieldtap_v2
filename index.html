@@ -754,7 +754,7 @@ input[type="number"]::-webkit-inner-spin-button { -webkit-appearance: none; }
 // ════════════════════════════════════════════════════════════════
 // CONFIG — substitua pela URL real do Web App GAS
 // ════════════════════════════════════════════════════════════════
-const GAS_URL = 'https://script.google.com/macros/s/AKfycbxGXse5zMb6J7sLyczwWkWf-N5PHcSw3Wp9LUiAzDD8qBgAaXy3omcPlsHsSNBUAYA/exec';
+const GAS_URL = 'https://script.google.com/macros/s/AKfycby1Aa2timPdO-L8uRkgpO9LOLgJ1afS8tWiRqF8FzXDsA4AM35XG9oVrP_zrLfewRpO/exec';
 
 // ════════════════════════════════════════════════════════════════
 // ESTADO DA SESSÃO
@@ -1837,10 +1837,11 @@ async function fecharOSFase2() {
   const conc  = _f2Itens.filter(i => i._concluido).length;
   if (conc < total) { showToast('Conclua todos os itens primeiro', 'err'); return; }
 
-  showLoading('Fechando OS…');
+  showLoading('Finalizando Fase 2…');
   if (GAS_URL) {
     try {
-      await gasPost('avancarFaseOS', { id_os: SES.os?.id_os, nova_fase: 'encerrada' });
+      // Sinaliza "fase 2 de campo concluída" — NÃO encerra a OS, retorna ao TapParts para continuidade
+      await gasPost('avancarFaseOS', { id_os: SES.os?.id_os, nova_fase: 'campo_concluido', observacao: 'Fase 2 concluída pelo FieldTap — aguardando encerramento no TapParts' });
     } catch(e) {}
   }
   hideLoading();
@@ -1848,7 +1849,7 @@ async function fecharOSFase2() {
   // Tela de sucesso (reaproveitamos TC)
   document.getElementById('tc-summary').textContent =
     `${SES.inspetor?.nome} · ${total} iten${total !== 1 ? 's' : ''} concluído${total !== 1 ? 's' : ''}`;
-  document.getElementById('tc-lev-id').textContent = '✅ OS Encerrada — Fase 2 concluída';
+  document.getElementById('tc-lev-id').textContent = '✅ Fase 2 Concluída — OS retornada ao escritório';
   goTo('tc');
 }
 
