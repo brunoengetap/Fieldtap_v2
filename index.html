@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-<title>FieldTap S16 — OS recentes por 3 dias com cancelamento — Engetap</title>
+<title>FieldTap S17 — Correções cirúrgicas snapshot/Fase2/cache — Engetap</title>
 <link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@600;700;800&family=Barlow:wght@400;500;600;700&display=swap" rel="stylesheet">
 <style>
 :root {
@@ -764,10 +764,10 @@ input[type="number"]::-webkit-inner-spin-button { -webkit-appearance: none; }
 // ════════════════════════════════════════════════════════════════
 // CONFIG — substitua pela URL real do Web App GAS
 // ════════════════════════════════════════════════════════════════
-const GAS_URL = 'https://script.google.com/macros/s/AKfycbzhHc9TB3HAuLcPXSPc67BllcrnOSGyLMULFbEfK3GhcQa_1VXGddUAYuB1xyYXJ26v/exec';
+const GAS_URL = 'https://script.google.com/macros/s/AKfycbzrtYuEsGHDQ9n7UgnRSIFPOYomAcVe_NqcXZJ0--4q-ct5VaYp_IRrN_9kFE33v7Jv/exec';
 
-// Correção S12 — versionamento
-const APP_VERSION = 'S16';
+// S17 — Correções cirúrgicas: snapshot pré-envio, reconciliação Fase 2, cache Atualizar
+const APP_VERSION = 'S17';
 
 // ════════════════════════════════════════════════════════════════
 // ESTADO DA SESSÃO
@@ -1000,7 +1000,10 @@ async function afterLogin() {
       gasGet('getCatalogos')
     ]);
     if (rOs.status === 'ok') {
-      SES._osList = (rOs.os || []).filter(isOSVisivelFieldTapLocal);
+      const osRecebidas = rOs.os || [];
+      // [FASE2_SYNC] BUG6-FIX: reconciliar localStorage no login também
+      _reconciliarStoreComGAS(osRecebidas);
+      SES._osList = osRecebidas.filter(isOSVisivelFieldTapLocal);
       SES._gasOSCarregado = true; // GAS respondeu: nunca usar demo para OS
     }
     if (rCat.status === 'ok') {
@@ -1050,8 +1053,20 @@ async function atualizarOSFieldTap(btn) {
   setGASStatus('spin', 'Atualizando OS…');
   try {
     const r = await gasGet('getOS', { id_inspetor: SES.inspetor.id_inspetor });
+    console.log('[FIELDTAP_SYNC] Resposta bruta getOS:', JSON.stringify(r).substring(0, 500));
     if (r.status === 'ok') {
-      SES._osList = (r.os || []).filter(isOSVisivelFieldTapLocal);
+      const osRecebidas = r.os || [];
+      console.log('[FIELDTAP_SYNC] OS recebidas do GAS:', osRecebidas.length, '— id_inspetor:', SES.inspetor.id_inspetor);
+      osRecebidas.forEach(o => console.log('[FIELDTAP_SYNC] OS:', o.id_os, 'fase_atual:', o.fase_atual, 'status:', o.status));
+
+      // [FASE2_SYNC] BUG2+BUG6-FIX: reconciliar localStorage ANTES de filtrar
+      // Remove do fase1_enviadas OS que o GAS retornou como Fase 2 ou Fase 1 ativa
+      _reconciliarStoreComGAS(osRecebidas);
+
+      const osFiltradas = osRecebidas.filter(isOSVisivelFieldTapLocal);
+      console.log('[FIELDTAP_SYNC] OS após filtro local:', osFiltradas.length, '— ids:', osFiltradas.map(o=>o.id_os).join(', '));
+
+      SES._osList = osFiltradas;
       SES._gasOSCarregado = true;
       _lastOSRefresh = Date.now();
       setGASStatus('ok', 'GAS conectado ✓');
@@ -1093,6 +1108,59 @@ function getFimTerceiroDiaLocal(baseIso){ const dt = baseIso ? new Date(baseIso)
 function getFieldTapRecentesStore(){ try{ const raw=localStorage.getItem(getRetencaoFieldTapKey()); const parsed=raw?JSON.parse(raw):{}; const store={fase1_enviadas:parsed.fase1_enviadas||{}, fase2_concluidas:parsed.fase2_concluidas||{}}; return limparOSRecentesExpiradas(store);}catch(e){ return {fase1_enviadas:{},fase2_concluidas:{}}; } }
 function saveFieldTapRecentesStore(store){ try{ localStorage.setItem(getRetencaoFieldTapKey(), JSON.stringify(store||{fase1_enviadas:{},fase2_concluidas:{}})); }catch(e){} }
 function isDentroRetencao3Dias(ts,expira){ const limite = expira?new Date(expira):new Date(getFimTerceiroDiaLocal(ts)); return Date.now() <= limite.getTime(); }
+
+// [CANCELAMENTO_ENVIO] BUG1-FIX: funções de snapshot pré-envio
+// Salva estado completo da OS antes de enviar para que possa ser restaurado ao cancelar
+function _salvarSnapshotPreEnvio(snapshot) {
+  try {
+    const baseKey = 'fieldtap_snapshot_' + (SES.inspetor?.id_inspetor || 'anon');
+    const key = baseKey + '_' + snapshot.id_os;
+    localStorage.setItem(key, JSON.stringify(snapshot));
+  } catch(e) { console.warn('[CANCELAMENTO_ENVIO] Falha ao salvar snapshot:', e); }
+}
+function _lerSnapshotPreEnvio(idOS) {
+  try {
+    const baseKey = 'fieldtap_snapshot_' + (SES.inspetor?.id_inspetor || 'anon');
+    const key = baseKey + '_' + idOS;
+    const raw = localStorage.getItem(key);
+    return raw ? JSON.parse(raw) : null;
+  } catch(e) { return null; }
+}
+function _limparSnapshotPreEnvio(idOS) {
+  try {
+    const baseKey = 'fieldtap_snapshot_' + (SES.inspetor?.id_inspetor || 'anon');
+    localStorage.removeItem(baseKey + '_' + idOS);
+  } catch(e) {}
+}
+
+// [FASE2_SYNC] BUG2+BUG6-FIX: reconciliar localStorage com estado real do GAS.
+// Remove do fase1_enviadas qualquer OS que o GAS retornou como fase_atual=2 (já avançou de fase)
+// ou como fase_atual=1 ativa (foi reaberta pelo TapParts).
+function _reconciliarStoreComGAS(osListGAS) {
+  try {
+    const store = getFieldTapRecentesStore();
+    let mudou = false;
+    osListGAS.forEach(o => {
+      const idOS = o.id_os;
+      const fase = String(o.fase_atual || '').trim().toLowerCase();
+      const status = String(o.status || '').trim().toLowerCase();
+      // Se o GAS retornou a OS como Fase 2 → ela não deve mais estar em fase1_enviadas
+      if ((fase === '2' || status === 'fase 2') && store.fase1_enviadas[idOS]) {
+        console.log('[FASE2_SYNC] OS', idOS, 'avançou para Fase 2 no GAS — removendo de fase1_enviadas.');
+        delete store.fase1_enviadas[idOS];
+        mudou = true;
+      }
+      // Se o GAS retornou a OS como Fase 1 ativa (não aguardando_tapparts) → remover de enviadas
+      // Isso cobre o caso de reabertura pelo TapParts
+      if ((fase === '1' || status === 'fase 1') && store.fase1_enviadas[idOS]) {
+        console.log('[FASE2_SYNC] OS', idOS, 'retornou como Fase 1 ativa — removendo de fase1_enviadas para exibir corretamente.');
+        delete store.fase1_enviadas[idOS];
+        mudou = true;
+      }
+    });
+    if (mudou) saveFieldTapRecentesStore(store);
+  } catch(e) { console.warn('[FASE2_SYNC] Erro na reconciliação:', e); }
+}
 function limparOSRecentesExpiradas(store){ const now=Date.now(); ['fase1_enviadas','fase2_concluidas'].forEach(k=>{ Object.keys(store[k]||{}).forEach(id=>{ const r=store[k][id]; const exp=r?.expira_em?new Date(r.expira_em).getTime():new Date(getFimTerceiroDiaLocal(r?.timestamp_envio||r?.timestamp_fechamento)).getTime(); if(!exp||now>exp) delete store[k][id]; }); }); saveFieldTapRecentesStore(store); return store; }
 function isOSVisivelFieldTapLocal(o) {
   const fase = String(o?.fase_atual || '').trim().toLowerCase();
@@ -1222,6 +1290,15 @@ async function selectOS(id) {
   }
 
   SES.levantamento = {};
+
+  // [CANCELAMENTO_ENVIO] BUG1-FIX: verificar se existe snapshot pré-envio para esta OS.
+  // Se existir, restaurar os itens já preenchidos em vez de zerar o levantamento.
+  const snapExistente = _lerSnapshotPreEnvio(id);
+  if (snapExistente && snapExistente.levantamento && Object.keys(snapExistente.levantamento).length > 0) {
+    SES.levantamento = JSON.parse(JSON.stringify(snapExistente.levantamento));
+    console.log('[CANCELAMENTO_ENVIO] Snapshot restaurado para OS', id, '— itens:', Object.values(SES.levantamento).flat().length);
+    showToast('Itens anteriores restaurados. Edite e reenvie.', 'warn');
+  }
   showLoading('Carregando equipamentos…');
   let equips = [];
   // Correção S10/S12 — busca de equipamentos com cache-buster, sem demo em produção
@@ -1877,6 +1954,25 @@ async function enviarLevantamento(btn) {
   showLoading('Enviando levantamento…');
   const allItems = [];
   Object.values(lev).forEach(items => items.forEach(it => allItems.push(it)));
+
+  // [CANCELAMENTO_ENVIO] BUG1-FIX: salvar snapshot completo antes de enviar
+  // Isso permite restaurar o estado exato se o usuário cancelar o envio
+  const snapshotKey = 'fieldtap_snapshot_' + (SES.inspetor?.id_inspetor || 'anon') + '_' + SES.os.id_os;
+  const snapshot = {
+    id_os: SES.os.id_os,
+    numero_os: SES.os.numero_os || SES.os.id_os,
+    fase: SES.os.fase_atual || '1',
+    levantamento: JSON.parse(JSON.stringify(SES.levantamento)),
+    equipamentos: JSON.parse(JSON.stringify(SES.equipamentos || [])),
+    os: JSON.parse(JSON.stringify(SES.os)),
+    timestamp: new Date().toISOString(),
+    id_levantamento: null // será preenchido após resposta do GAS
+  };
+
+  // Verificar se há id_levantamento salvo de cancelamento anterior para este OS
+  const snapshotAnterior = _lerSnapshotPreEnvio(SES.os.id_os);
+  const idLevantamentoExistente = snapshotAnterior?.id_levantamento || null;
+
   const payload = {
     id_inspetor: SES.inspetor.id_inspetor,
     id_os: SES.os.id_os,
@@ -1885,6 +1981,13 @@ async function enviarLevantamento(btn) {
     timestamp: new Date().toISOString(),
     itens: allItems
   };
+
+  // [CANCELAMENTO_ENVIO] BUG1-FIX: passar id_levantamento existente se for reenvio após cancelamento
+  if (idLevantamentoExistente) {
+    payload.id_levantamento = idLevantamentoExistente;
+    console.log('[CANCELAMENTO_ENVIO] Reenvio com id_levantamento existente:', idLevantamentoExistente);
+  }
+
   let levId = 'LEV-' + new Date().getFullYear() + '-' + String(Math.floor(Math.random()*900)+100);
   let enviado = false;
   try {
@@ -1895,6 +1998,10 @@ async function enviarLevantamento(btn) {
     enviado = true;
   }
   hideLoading();
+
+  // [CANCELAMENTO_ENVIO] BUG1-FIX: salvar snapshot com id_levantamento real recebido do GAS
+  snapshot.id_levantamento = levId;
+  _salvarSnapshotPreEnvio(snapshot);
 
   // Sprint 8: marca a OS como levantamento enviado para sumir da lista
   if (enviado && SES._osList) {
@@ -1920,10 +2027,22 @@ async function cancelarEnvioOS(idOS) {
   try {
     const r = await gasPost('cancelarEnvioLevantamentoFieldTap', { id_os:idOS, id_inspetor:SES.inspetor?.id_inspetor, origem:'FieldTap' });
     if (r.status !== 'ok') throw new Error(r.mensagem || 'Falha ao cancelar envio');
+
+    // [CANCELAMENTO_ENVIO] BUG1-FIX: GAS retorna id_levantamento do levantamento em correção.
+    // Atualizar o snapshot salvo com o id_levantamento confirmado pelo GAS, se houver.
+    if (r.id_levantamento) {
+      const snap = _lerSnapshotPreEnvio(idOS);
+      if (snap) {
+        snap.id_levantamento = r.id_levantamento;
+        _salvarSnapshotPreEnvio(snap);
+        console.log('[CANCELAMENTO_ENVIO] Snapshot atualizado com id_levantamento do GAS:', r.id_levantamento);
+      }
+    }
+
     const store = getFieldTapRecentesStore(); delete store.fase1_enviadas[idOS]; saveFieldTapRecentesStore(store);
     if (SES._osEnviadas) SES._osEnviadas.delete(idOS);
     await atualizarOSFieldTap(null); renderT2();
-    showToast('Envio cancelado. OS liberada para correção.');
+    showToast('Envio cancelado. Abra a OS para continuar editando os itens.');
   } catch(e){ showToast(e.message || 'Erro ao cancelar envio', 'err'); }
 }
 
@@ -2137,6 +2256,8 @@ async function fecharOSFase2(btn) {
   const ts = new Date().toISOString();
   store.fase2_concluidas[SES.os?.id_os] = { id_os: SES.os?.id_os, numero_os: SES.os?.numero_os||SES.os?.id_os, cliente: SES.os?.cliente||'', descricao: SES.os?.descricao||'', fase_atual_original:'2', status_original:'Fase 2', timestamp_fechamento: ts, total_itens: total, expira_em:getFimTerceiroDiaLocal(ts) };
   saveFieldTapRecentesStore(store);
+  // [CANCELAMENTO_ENVIO] Limpar snapshot pré-envio ao finalizar a OS (já não é necessário)
+  _limparSnapshotPreEnvio(SES.os?.id_os);
   showToast('✅ Fase 2 concluída recentemente — OS retornada ao escritório');
   await atualizarOSFieldTap(null);
   renderT2();
