@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-<title>FieldTap S17.2 — Hotfix edição pós-cancelamento Fase 2 — Engetap</title>
+<title>FieldTap S17.3-Beta-RC1 — Cliente em revisão, escala custom, rascunho local, Outro com tipo</title>
 <link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@600;700;800&family=Barlow:wght@400;500;600;700&display=swap" rel="stylesheet">
 <style>
 :root {
@@ -764,10 +764,10 @@ input[type="number"]::-webkit-inner-spin-button { -webkit-appearance: none; }
 // ════════════════════════════════════════════════════════════════
 // CONFIG — substitua pela URL real do Web App GAS
 // ════════════════════════════════════════════════════════════════
-const GAS_URL = 'https://script.google.com/macros/s/AKfycbzrtYuEsGHDQ9n7UgnRSIFPOYomAcVe_NqcXZJ0--4q-ct5VaYp_IRrN_9kFE33v7Jv/exec';
+const GAS_URL = 'https://script.google.com/macros/s/AKfycbzaYkBqamEi21pTaBl_LYAhj9JkkxwFGfapWMrUCnfTCA7BMV9O5D0fWQeQP2fmGnKd/exec';
 
 // S17 — Correções cirúrgicas: snapshot pré-envio, reconciliação Fase 2, cache Atualizar
-const APP_VERSION = 'S17.2';
+const APP_VERSION = 'S17.3-Beta-RC1';
 
 // ════════════════════════════════════════════════════════════════
 // ESTADO DA SESSÃO
@@ -1133,6 +1133,56 @@ function _limparSnapshotPreEnvio(idOS) {
   } catch(e) {}
 }
 
+// ════════════════════════════════════════════════════════════════
+// [DRAFT_LOCAL] S17 — Rascunho automático durante o levantamento
+// Diferente do snapshot pré-envio (que protege contra cancelamento DEPOIS de enviar),
+// o draft protege contra fechamento acidental do app ANTES de enviar.
+// ════════════════════════════════════════════════════════════════
+function _draftKey(idOS) {
+  const insp = (SES.inspetor?.id_inspetor || 'anon').toString().trim();
+  const id = (idOS || SES.os?.id_os || 'noos').toString().trim();
+  return 'fieldtap_draft_' + insp + '_' + id;
+}
+function salvarRascunhoLevantamento() {
+  try {
+    if (!SES.os?.id_os || !SES.inspetor?.id_inspetor) return;
+    const totalItens = Object.values(SES.levantamento || {}).reduce((s,a)=>s+a.length, 0);
+    if (totalItens === 0) {
+      // não criar draft vazio — limpa qualquer um existente
+      limparRascunhoLevantamento();
+      return;
+    }
+    const draft = {
+      app_version: APP_VERSION,
+      timestamp: new Date().toISOString(),
+      id_inspetor: SES.inspetor.id_inspetor,
+      id_os: SES.os.id_os,
+      os: SES.os,
+      equipamentos: SES.equipamentos || [],
+      levantamento: SES.levantamento || {},
+      total_itens: totalItens
+    };
+    localStorage.setItem(_draftKey(), JSON.stringify(draft));
+  } catch(e) { console.warn('[DRAFT_LOCAL] salvar falhou:', e); }
+}
+function lerRascunhoLevantamento(idOS) {
+  try {
+    const raw = localStorage.getItem(_draftKey(idOS));
+    if (!raw) return null;
+    const d = JSON.parse(raw);
+    // invalidar drafts de versão antiga (evita restaurar estados incompatíveis pós-deploy)
+    if (d.app_version && d.app_version !== APP_VERSION) {
+      console.warn('[DRAFT_LOCAL] versão diferente; descartando draft antigo:', d.app_version);
+      localStorage.removeItem(_draftKey(idOS));
+      return null;
+    }
+    return d;
+  } catch(e) { return null; }
+}
+function limparRascunhoLevantamento(idOS) {
+  try { localStorage.removeItem(_draftKey(idOS)); } catch(e) {}
+}
+
 // [FASE2_SYNC] BUG2+BUG6-FIX: reconciliar localStorage com estado real do GAS.
 // Remove do fase1_enviadas qualquer OS que o GAS retornou como fase_atual=2 (já avançou de fase)
 // ou como fase_atual=1 ativa (foi reaberta pelo TapParts).
@@ -1298,6 +1348,31 @@ async function selectOS(id) {
     SES.levantamento = JSON.parse(JSON.stringify(snapExistente.levantamento));
     console.log('[CANCELAMENTO_ENVIO] Snapshot restaurado para OS', id, '— itens:', Object.values(SES.levantamento).flat().length);
     showToast('Itens anteriores restaurados. Edite e reenvie.', 'warn');
+    // [DRAFT_LOCAL] S17 — snapshot tem prioridade; descartar draft conflitante se existir
+    const draftConflito = lerRascunhoLevantamento(id);
+    if (draftConflito) {
+      console.warn('[DRAFT_LOCAL] Snapshot pré-envio tem prioridade. Descartando draft conflitante.');
+      limparRascunhoLevantamento(id);
+    }
+  } else {
+    // [DRAFT_LOCAL] S17 — sem snapshot: oferecer restaurar rascunho local se houver
+    const draft = lerRascunhoLevantamento(id);
+    if (draft && draft.total_itens > 0 && draft.levantamento) {
+      const restaurar = confirm(
+        'Existe um rascunho não enviado desta OS com ' + draft.total_itens + ' item(s).\n\n' +
+        'OK = Restaurar\nCancelar = Descartar e começar do zero'
+      );
+      if (restaurar) {
+        SES.levantamento = JSON.parse(JSON.stringify(draft.levantamento));
+        // restaura também os equipamentos do draft, caso GAS não retorne (offline)
+        if (Array.isArray(draft.equipamentos) && draft.equipamentos.length) {
+          SES._draftEquips = draft.equipamentos;
+        }
+        showToast('Rascunho restaurado: ' + draft.total_itens + ' itens recuperados', 'ok');
+      } else {
+        limparRascunhoLevantamento(id);
+      }
+    }
   }
   showLoading('Carregando equipamentos…');
   let equips = [];
@@ -1328,6 +1403,12 @@ async function selectOS(id) {
       SES._equipGASErro = true;
     }
   }
+  // [DRAFT_LOCAL] S17 — se GAS não retornou equipamentos mas temos draft com equipamentos, usa draft
+  if ((!equips || equips.length === 0) && Array.isArray(SES._draftEquips) && SES._draftEquips.length) {
+    console.log('[DRAFT_LOCAL] Usando equipamentos do draft como fallback.');
+    equips = SES._draftEquips;
+  }
+  SES._draftEquips = null;
   SES.equipamentos = equips;
   hideLoading();
   renderT3();
@@ -1472,11 +1553,20 @@ async function salvarNovoEquip() {
   let newId = 'EQ-' + Date.now();
   try {
     const r = await gasPost('salvarEquipamento', obj);
+    // [DUPLICADO] S17 — tratar resposta DUPLICADO do GAS
+    if (r && r.status === 'erro' && r.codigo === 'DUPLICADO') {
+      hideLoading();
+      const exist = r.existente || {};
+      showToast('TAG já cadastrada neste cliente: ' + (exist.tag || tag) + '. Use o existente.', 'err');
+      return;
+    }
     if (r.status === 'ok') newId = r.id_equipamento || newId;
   } catch(e) {}
   obj.id_equipamento = newId;
   obj.ativo = 'true';
   SES.equipamentos.push(obj);
+  // [DRAFT_LOCAL] S17 — preservar equipamento cadastrado no rascunho
+  try { salvarRascunhoLevantamento(); } catch(e) {}
   hideLoading();
   closeDialog('modal-novoequip');
   renderT3();
@@ -1634,15 +1724,23 @@ function renderT5c() {
   const escalasParaMostrar = [padrao, ...ESCALAS_PADRAO.filter(e=>e!==padrao)].filter(Boolean).slice(0,8);
   selectedEscala = padrao || null;
   const grid = document.getElementById('t5c-scales');
-  grid.innerHTML = escalasParaMostrar.map(e => `
+  // [ESCALA_CUSTOM] S17 — tile fixa "Personalizada" sempre visível ao final
+  const tilesPadrao = escalasParaMostrar.map(e => `
     <div class="scale-opt ${e===selectedEscala?'sel':''}" onclick="selectEscalaPadrao('${e}',this)">
       <div class="scale-val">${e.split(' ')[0]}</div>
       <div class="scale-unit">${e.split(' ').slice(1).join(' ')}</div>
     </div>`).join('');
+  const tilePersonalizada = `
+    <div class="scale-opt" data-personalizada="1" onclick="selectEscalaPersonalizada(this)">
+      <div class="scale-val">⚙️</div>
+      <div class="scale-unit">Personalizada</div>
+    </div>`;
+  grid.innerHTML = tilesPadrao + tilePersonalizada;
   // limpa personalizada
   document.getElementById('sc-inicio').value = '';
   document.getElementById('sc-fim').value = '';
   document.getElementById('sc-unit').value = 'kgf/cm²';
+  document.getElementById('t5c-custom-wrap').classList.remove('open');
   goTo('t5c');
 }
 
@@ -1654,6 +1752,16 @@ function selectEscalaPadrao(val, el) {
   document.getElementById('sc-inicio').value = '';
   document.getElementById('sc-fim').value = '';
   document.getElementById('t5c-custom-wrap').classList.remove('open');
+}
+
+// [ESCALA_CUSTOM] S17 — selecionar tile Personalizada abre/destaca os 3 campos
+function selectEscalaPersonalizada(el) {
+  selectedEscala = null;
+  document.querySelectorAll('.scale-opt').forEach(e=>e.classList.remove('sel'));
+  if (el) el.classList.add('sel');
+  document.getElementById('t5c-custom-wrap').classList.add('open');
+  // foco no início para acelerar digitação
+  setTimeout(() => { try { document.getElementById('sc-inicio').focus(); } catch(e) {} }, 50);
 }
 
 document.addEventListener('DOMContentLoaded', () => {
@@ -1858,10 +1966,14 @@ function saveCurrentItemToLevantamento() {
   const eqId = SES.equip.id_equipamento;
   if (!SES.levantamento[eqId]) SES.levantamento[eqId] = [];
   const kitComps = kit && Array.isArray(kit.componentes) ? kit.componentes : [];
+  // [OUTRO_TIPO] S17 — preservar o tipo digitado quando item veio do fluxo "Outro"
+  const tipoAcessorio = (SES.tipo === 'outro' && SES.outroTipo)
+    ? SES.outroTipo
+    : (SES.tipo || 'outro');
   SES.levantamento[eqId].push({
     id_equipamento: eqId,
     tag_equipamento: SES.equip.tag,
-    tipo_acessorio: SES.tipo || 'outro',
+    tipo_acessorio: tipoAcessorio,
     id_item_catalogo: item?.id || '',
     descricao_curta: item?.desc_curta || SES.outroDesc || '',
     quantidade: SES.quantidade,
@@ -1874,7 +1986,11 @@ function saveCurrentItemToLevantamento() {
     requer_calibracao: item?.requer_calibracao || 'false',
     requer_lacre: 'false',
     instalado_imediatamente: SES.situacao === 'agora' ? 'true' : 'false',
+    // [OUTRO_TIPO] S17 — marca explícita para renderização correta na revisão
+    _veio_de_outro: (SES.tipo === 'outro') ? 'true' : 'false',
   });
+  // [DRAFT_LOCAL] S17 — salvar rascunho após cada item adicionado
+  try { salvarRascunhoLevantamento(); } catch(e) {}
   showToast('Item adicionado ✓');
 }
 
@@ -1904,9 +2020,15 @@ function showRevision() {
           </div>
         </div>`;
       items.forEach((it, idx) => {
+        // [OUTRO_TIPO] S17 — quando item veio de "Outro", mostrar tipo digitado em destaque
+        const ehOutroPersonalizado = String(it._veio_de_outro) === 'true' && it.tipo_acessorio;
+        const blocoTitulo = ehOutroPersonalizado
+          ? `<div class="rev-item-name"><strong>${it.tipo_acessorio}</strong></div>
+             <div style="font-size:13px;color:var(--text2);margin-top:2px">${it.descricao_curta}</div>`
+          : `<div class="rev-item-name">${it.descricao_curta}</div>`;
         html += `<div class="rev-item">
           <div class="rev-item-info">
-            <div class="rev-item-name">${it.descricao_curta}</div>
+            ${blocoTitulo}
             <div class="rev-item-detail">
               Qtd: ${it.quantidade}
               ${it.escala_inicio !== '' && it.escala_inicio !== undefined ? ` · ${it.escala_inicio}–${it.escala_fim} ${it.escala_unidade}` : ''}
@@ -1935,6 +2057,8 @@ function showRevision() {
 function removeItem(eqId, idx) {
   SES.levantamento[eqId].splice(idx, 1);
   if (!SES.levantamento[eqId].length) delete SES.levantamento[eqId];
+  // [DRAFT_LOCAL] S17 — atualizar rascunho após remoção
+  try { salvarRascunhoLevantamento(); } catch(e) {}
   showRevision();
 }
 
@@ -2002,6 +2126,12 @@ async function enviarLevantamento(btn) {
   // [CANCELAMENTO_ENVIO] BUG1-FIX: salvar snapshot com id_levantamento real recebido do GAS
   snapshot.id_levantamento = levId;
   _salvarSnapshotPreEnvio(snapshot);
+
+  // [DRAFT_LOCAL] S17 — limpar rascunho APENAS após envio bem-sucedido.
+  // Se falhou, manter rascunho para o usuário poder tentar de novo.
+  if (enviado) {
+    try { limparRascunhoLevantamento(SES.os.id_os); } catch(e) {}
+  }
 
   // Sprint 8: marca a OS como levantamento enviado para sumir da lista
   if (enviado && SES._osList) {
@@ -2408,6 +2538,14 @@ window.addEventListener('DOMContentLoaded', () => {
     setGASStatus('','Modo demo local');
     document.getElementById('gasDot').style.background='var(--warn)';
   }
+  // [DRAFT_LOCAL] S17 — garantir persistência do rascunho em fechamento brusco
+  window.addEventListener('beforeunload', function() {
+    try {
+      if (SES && SES.os && SES.inspetor) {
+        salvarRascunhoLevantamento();
+      }
+    } catch(e) {}
+  });
 });
 </script>
 </body>
